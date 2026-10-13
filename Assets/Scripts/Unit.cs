@@ -44,6 +44,9 @@ public class Unit : MonoBehaviour
 
     private GameObject hpBarObj;
     private RectTransform hpBarTransform;
+    // 歩行バウンド用
+    private Transform visualModelTransform;
+    private float walkAnimTimer = 0f;
     private RectTransform hpFillRect;
     private float barHeight = 2.2f;
 
@@ -163,6 +166,7 @@ public class Unit : MonoBehaviour
 
         CacheRenderers();
         CreateHeadHpBar();
+        visualModelTransform = transform.Find("VisualModel");
     }
 
     private void CacheRenderers()
@@ -182,6 +186,35 @@ public class Unit : MonoBehaviour
     private void Update()
     {
         if (IsDead) return;
+        // 歩行時のボビング（ピョコピョコ跳ねる）アニメーション
+        if (visualModelTransform != null && !isTower)
+        {
+            bool isMoving = false;
+            if (isFlying)
+            {
+                // 飛行兵はゆったりと上下にホバリング
+                walkAnimTimer += Time.deltaTime * 3.5f;
+                visualModelTransform.localPosition = new Vector3(0f, Mathf.Sin(walkAnimTimer) * 0.15f, 0f);
+                visualModelTransform.localRotation = Quaternion.Euler(Mathf.Sin(walkAnimTimer * 0.7f) * 6f, 0f, 0f);
+            }
+            else if (agent != null && agent.enabled && !agent.isStopped && agent.velocity.sqrMagnitude > 0.1f)
+            {
+                isMoving = true;
+                walkAnimTimer += Time.deltaTime * 12f;
+                // 上下に跳ねつつ、左右に少し体を揺らす
+                float bounceY = Mathf.Abs(Mathf.Sin(walkAnimTimer)) * 0.18f;
+                float tiltZ = Mathf.Sin(walkAnimTimer * 0.5f) * 7f;
+                visualModelTransform.localPosition = new Vector3(0f, bounceY, 0f);
+                visualModelTransform.localRotation = Quaternion.Euler(0f, 0f, tiltZ);
+            }
+
+            if (!isMoving && !isFlying)
+            {
+                // 静止時はニュートラル姿勢へ戻す
+                visualModelTransform.localPosition = Vector3.Lerp(visualModelTransform.localPosition, Vector3.zero, Time.deltaTime * 10f);
+                visualModelTransform.localRotation = Quaternion.Lerp(visualModelTransform.localRotation, Quaternion.identity, Time.deltaTime * 10f);
+            }
+        }
         if (BattleManager.CurrentGameState != BattleManager.GameState.Battle) return;
 
         if (isTower)
@@ -409,6 +442,12 @@ public class Unit : MonoBehaviour
         {
             SoundManager.Instance.Play(SoundManager.SoundType.MeteorExplosion, 0.7f);
         }
+        // ボスの咆哮で強烈な画面揺れ
+        if (CameraController.Instance != null)
+        {
+            CameraController.Instance.Shake(0.35f, 0.45f);
+            CameraController.Instance.TriggerHitStop(0.06f);
+        }
 
         GameObject shock = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
         shock.name = "Boss_RoarWave";
@@ -622,7 +661,17 @@ public class Unit : MonoBehaviour
     public void TakeDamage(float damage)
     {
         if (IsDead) return;
-
+        // タワーやボスへの大ダメージ時に画面を揺らす
+        if (isTower)
+        {
+            if (CameraController.Instance != null)
+                CameraController.Instance.Shake(0.18f, 0.25f);
+        }
+        else if (isBoss && damage >= 40f)
+        {
+            if (CameraController.Instance != null)
+                CameraController.Instance.TriggerHitStop(0.04f);
+        }
         currentHp = Mathf.Max(0f, currentHp - damage);
         UpdateHealthBar();
 

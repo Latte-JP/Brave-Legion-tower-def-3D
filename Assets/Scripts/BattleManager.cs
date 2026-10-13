@@ -37,6 +37,8 @@ public class BattleManager : MonoBehaviour
     [Header("Towers")]
     [SerializeField] private GameObject playerTower;
     [SerializeField] private GameObject enemyTower;
+    [Header("Title Screen Visuals")]
+    [SerializeField] private Texture2D titleBgImage; // インスペクターから画像を割り当て
 
     [Header("Mana Settings")]
     [SerializeField] private float maxMana = 10f;
@@ -73,7 +75,9 @@ public class BattleManager : MonoBehaviour
     private bool isAimingMeteor = false;
     private float lastPlayerSpawnTime = -1f;
     private const float SpawnCooldown = 0.22f;
-
+    // フェーズ1：快適性＆テンポ制御
+    public static bool IsGamePaused { get; private set; } = false;
+    public static float GameSpeedMultiplier { get; private set; } = 1.0f; // 1.0f または 2.0f
     public static void RegisterEnemyKill(bool isBoss = false)
     {
         enemyKillCount++;
@@ -140,7 +144,22 @@ public class BattleManager : MonoBehaviour
                 break;
 
             case GameState.Battle:
-                UpdateBattleLoop();
+                // ポーズ切り替え（Pキー）
+                if (Input.GetKeyDown(KeyCode.P))
+                {
+                    TogglePause();
+                }
+
+                // 倍速切り替え（Tabキー）
+                if (Input.GetKeyDown(KeyCode.Tab))
+                {
+                    ToggleSpeed();
+                }
+
+                if (!IsGamePaused)
+                {
+                    UpdateBattleLoop();
+                }
                 break;
 
             case GameState.Result:
@@ -173,7 +192,9 @@ public class BattleManager : MonoBehaviour
         waveBannerText = (SelectedDifficulty == Difficulty.Hard) ? "HARD MODE: WAVE 1 START!" : "WAVE 1 START!";
         waveBannerTimer = 3.0f;
         bossSpawned = false;
-
+        IsGamePaused = false;
+        GameSpeedMultiplier = 1.0f;
+        Time.timeScale = 1.0f;
         if (SoundManager.Instance != null)
         {
             SoundManager.Instance.Play(SoundManager.SoundType.Spawn, 0.7f);
@@ -362,6 +383,12 @@ public class BattleManager : MonoBehaviour
         if (VisualEffectManager.Instance != null)
         {
             VisualEffectManager.Instance.PlayMeteorExplosion(impactPoint);
+        }
+        // メテオ着弾の強烈な画面振動とヒットストップ
+        if (CameraController.Instance != null)
+        {
+            CameraController.Instance.Shake(0.4f, 0.65f); // 大きく揺らす
+            CameraController.Instance.TriggerHitStop(0.08f); // 0.08秒の重厚な打撃硬直
         }
 
         if (SoundManager.Instance != null)
@@ -724,20 +751,43 @@ public class BattleManager : MonoBehaviour
 
     private void DrawTitleScreen(float sw, float sh)
     {
-        GUI.DrawTexture(new Rect(0, 0, sw, sh), overlayDarkTex);
+        // 1. タイトル背景画像の描画
+        if (titleBgImage != null)
+        {
+            // 画面全体にアスペクト比を考慮してフィット（Fill）描画
+            GUI.DrawTexture(new Rect(0, 0, sw, sh), titleBgImage, ScaleMode.ScaleAndCrop);
 
+            // 文字がくっきり読めるように、上部とボタン周辺にダークオーバーレイを半透明で薄く重ねる
+            GUI.color = new Color(0f, 0f, 0f, 0.45f);
+            GUI.DrawTexture(new Rect(0, 0, sw, sh), overlayDarkTex);
+            GUI.color = Color.white;
+        }
+        else
+        {
+            // 画像がセットされていない場合のフォールバック背景
+            GUI.DrawTexture(new Rect(0, 0, sw, sh), overlayDarkTex);
+        }
+
+        // 2. タイトルロゴ（背後にシャドウ効果を入れて視認性を向上）
         GUIStyle titleStyle = new GUIStyle(GUI.skin.label)
         {
-            fontSize = 48,
+            fontSize = 52,
             fontStyle = FontStyle.Bold,
             alignment = TextAnchor.MiddleCenter
         };
-        titleStyle.normal.textColor = new Color(0.3f, 0.8f, 1f);
-        GUI.Label(new Rect(0, sh * 0.15f, sw, 60f), "TOWER DEFENSE 3D", titleStyle);
 
-        float diffBtnW = 200f;
-        float diffBtnH = 38f;
-        Rect diffRect = new Rect((sw - diffBtnW) * 0.5f, sh * 0.28f, diffBtnW, diffBtnH);
+        // シャドウ
+        titleStyle.normal.textColor = new Color(0f, 0f, 0f, 0.85f);
+        GUI.Label(new Rect(2, sh * 0.12f + 2, sw, 65f), "TOWER DEFENSE 3D", titleStyle);
+
+        // メイン文字
+        titleStyle.normal.textColor = new Color(0.35f, 0.85f, 1f);
+        GUI.Label(new Rect(0, sh * 0.12f, sw, 65f), "TOWER DEFENSE 3D", titleStyle);
+
+        // 3. 難易度選択ボタン
+        float diffBtnW = 220f;
+        float diffBtnH = 40f;
+        Rect diffRect = new Rect((sw - diffBtnW) * 0.5f, sh * 0.23f, diffBtnW, diffBtnH);
         GUI.DrawTexture(diffRect, (SelectedDifficulty == Difficulty.Hard) ? btnHardTex : cardTexAvailable);
 
         GUIStyle emptyBtn = new GUIStyle(GUI.skin.button) { normal = { background = null }, hover = { background = null }, active = { background = null } };
@@ -745,33 +795,51 @@ public class BattleManager : MonoBehaviour
 
         GUIStyle diffLabel = new GUIStyle(GUI.skin.label)
         {
-            fontSize = 16,
+            fontSize = 15,
             fontStyle = FontStyle.Bold,
             alignment = TextAnchor.MiddleCenter
         };
         diffLabel.normal.textColor = (SelectedDifficulty == Difficulty.Hard) ? Color.yellow : Color.white;
         GUI.Label(diffRect, (SelectedDifficulty == Difficulty.Hard) ? "DIFFICULTY : HARD [D]" : "DIFFICULTY : NORMAL [D]", diffLabel);
 
-        GUIStyle guideStyle = new GUIStyle(GUI.skin.label) { fontSize = 13, alignment = TextAnchor.MiddleCenter };
-        guideStyle.normal.textColor = new Color(0.85f, 0.85f, 0.85f);
-        string guide = "【出撃】 [1] ソルジャー  [2] アーチャー  [3] タンク  [4] ワイバーン  [5] プリースト\n" +
-                       "【必殺技】 [6] メテオ（画面クリック投下）\n" +
-                       "【拠点強化】 [U] マナ回復UP  [I] タワー防衛砲撃UP\n" +
-                       "飛行強襲のワイバーンと回復のプリーストを駆使して進軍せよ！";
-        GUI.Label(new Rect(0, sh * 0.38f, sw, 80f), guide, guideStyle);
+        // 4. 操作ガイド（黒帯プレートを敷いて読みやすく）
+        float guideBoxW = 600f;
+        float guideBoxH = 90f;
+        Rect guideRect = new Rect((sw - guideBoxW) * 0.5f, sh * 0.32f, guideBoxW, guideBoxH);
+        GUI.DrawTexture(guideRect, overlayDarkTex);
 
-        float btnW = 260f;
-        float btnH = 60f;
-        Rect btnRect = new Rect((sw - btnW) * 0.5f, sh * 0.60f, btnW, btnH);
+        GUIStyle guideStyle = new GUIStyle(GUI.skin.label) { fontSize = 13, alignment = TextAnchor.MiddleCenter };
+        guideStyle.normal.textColor = new Color(0.9f, 0.9f, 0.9f);
+        string guide = "【出撃】 [1] 兵士  [2] 弓兵  [3] 盾兵  [4] 飛竜  [5] 僧侶\n" +
+                       "【必殺技】 [6] メテオ（画面クリック投下）\n" +
+                       "【拠点強化】 [U] マナ回復UP  [I] タワー砲撃UP\n" +
+                       "仲間たちを進軍させ、敵陣タワーを陥落させよ！";
+        GUI.Label(guideRect, guide, guideStyle);
+
+        // 5. BATTLE START ボタン
+        float btnW = 280f;
+        float btnH = 65f;
+        Rect btnRect = new Rect((sw - btnW) * 0.5f, sh * 0.72f, btnW, btnH);
 
         GUI.DrawTexture(btnRect, btnTex);
         if (GUI.Button(btnRect, GUIContent.none, emptyBtn)) StartBattle();
 
-        GUIStyle btnTextStyle = new GUIStyle(GUI.skin.label) { fontSize = 26, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter, normal = { textColor = Color.white } };
+        GUIStyle btnTextStyle = new GUIStyle(GUI.skin.label)
+        {
+            fontSize = 28,
+            fontStyle = FontStyle.Bold,
+            alignment = TextAnchor.MiddleCenter,
+            normal = { textColor = Color.white }
+        };
         GUI.Label(btnRect, "BATTLE START", btnTextStyle);
 
-        GUIStyle subTextStyle = new GUIStyle(GUI.skin.label) { fontSize = 14, alignment = TextAnchor.MiddleCenter, normal = { textColor = new Color(0.7f, 0.7f, 0.7f) } };
-        GUI.Label(new Rect(0, sh * 0.72f, sw, 30f), "Press [Enter] or [Space] to Start", subTextStyle);
+        GUIStyle subTextStyle = new GUIStyle(GUI.skin.label)
+        {
+            fontSize = 14,
+            alignment = TextAnchor.MiddleCenter,
+            normal = { textColor = new Color(0.9f, 0.9f, 0.9f) }
+        };
+        GUI.Label(new Rect(0, sh * 0.83f, sw, 30f), "Press [Enter] or [Space] to Start", subTextStyle);
     }
 
     private void DrawBattleScreen(float sw, float sh)
@@ -818,7 +886,47 @@ public class BattleManager : MonoBehaviour
         GUI.Label(new Rect(0, 15f, sw, 28f), waveTitle, waveStyle);
         GUIStyle subWaveStyle = new GUIStyle(GUI.skin.label) { fontSize = 13, alignment = TextAnchor.UpperCenter, normal = { textColor = new Color(0.85f, 0.85f, 0.85f) } };
         GUI.Label(new Rect(0, 42f, sw, 20f), nextWaveTimer, subWaveStyle);
+        // --- 倍速・ポーズボタン（画面右上） ---
+        float speedBtnW = 60f;
+        float speedBtnH = 26f;
+        float topBtnY = 20f;
+        Rect speedRect = new Rect(sw - 350f, topBtnY, speedBtnW, speedBtnH);
+        GUI.DrawTexture(speedRect, (GameSpeedMultiplier == 2.0f) ? btnHardTex : cardTexAvailable);
+        GUIStyle emptyBtn = new GUIStyle(GUI.skin.button) { normal = { background = null }, hover = { background = null }, active = { background = null } };
+        if (GUI.Button(speedRect, GUIContent.none, emptyBtn)) ToggleSpeed();
 
+        GUIStyle topBtnStyle = new GUIStyle(GUI.skin.label) { fontSize = 12, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter, normal = { textColor = Color.white } };
+        GUI.Label(speedRect, (GameSpeedMultiplier == 2.0f) ? "2x >>" : "1x >", topBtnStyle);
+
+        Rect pauseRect = new Rect(sw - 285f, topBtnY, speedBtnW, speedBtnH);
+        GUI.DrawTexture(pauseRect, IsGamePaused ? btnHardTex : cardTexAvailable);
+        if (GUI.Button(pauseRect, GUIContent.none, emptyBtn)) TogglePause();
+        GUI.Label(pauseRect, IsGamePaused ? "PLAY" : "PAUSE", topBtnStyle);
+
+        // --- ポーズ中のオーバーレイ表示 ---
+        if (IsGamePaused)
+        {
+            GUI.color = new Color(0f, 0f, 0f, 0.55f);
+            GUI.DrawTexture(new Rect(0, 0, sw, sh), overlayDarkTex);
+            GUI.color = Color.white;
+
+            GUIStyle pauseTextStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 44,
+                fontStyle = FontStyle.Bold,
+                alignment = TextAnchor.MiddleCenter,
+                normal = { textColor = Color.yellow }
+            };
+            GUI.Label(new Rect(0, sh * 0.4f, sw, 50f), "PAUSED", pauseTextStyle);
+
+            GUIStyle pauseSubStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 15,
+                alignment = TextAnchor.MiddleCenter,
+                normal = { textColor = Color.white }
+            };
+            GUI.Label(new Rect(0, sh * 0.48f, sw, 30f), "Press [P] or Click PAUSE to Resume", pauseSubStyle);
+        }
         DrawUpgradePanel(sw);
 
         if (waveBannerTimer > 0f)
@@ -1066,4 +1174,22 @@ public class BattleManager : MonoBehaviour
     }
 
     #endregion
+    public void TogglePause()
+    {
+        IsGamePaused = !IsGamePaused;
+        Time.timeScale = IsGamePaused ? 0f : GameSpeedMultiplier;
+        if (SoundManager.Instance != null)
+            SoundManager.Instance.Play(SoundManager.SoundType.Spawn, 0.5f);
+    }
+
+    public void ToggleSpeed()
+    {
+        GameSpeedMultiplier = (GameSpeedMultiplier == 1.0f) ? 2.0f : 1.0f;
+        if (!IsGamePaused)
+        {
+            Time.timeScale = GameSpeedMultiplier;
+        }
+        if (SoundManager.Instance != null)
+            SoundManager.Instance.Play(SoundManager.SoundType.Spawn, 0.5f);
+    }
 }
